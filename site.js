@@ -174,7 +174,7 @@
   function chosen() { return Array.prototype.map.call(bform.querySelectorAll('input[name="course"]:checked'), function (c) { return c.value; }); }
   function paintCourses() {
     var c = chosen(); cval.textContent = c.length ? c.join(', ') : 'Select one or more courses'; cval.classList.toggle('ph', !c.length);
-    document.getElementById('bk-sub').textContent = c.length ? 'Booking: ' + c.join(', ') : 'Leave your details and I will be in touch.';
+    document.getElementById('bk-sub').textContent = c.length ? 'Booking: ' + c.join(', ') : 'Please leave your details and I will be in touch.';
   }
   function setCourses(list) {
     Array.prototype.forEach.call(bform.querySelectorAll('input[name="course"]'), function (c) { c.checked = list.indexOf(c.value) > -1; });
@@ -425,6 +425,104 @@
     card.addEventListener('pointerleave', function () { inside = false; });
   })();
 
+  /* ----- hero parallax: the traffic light scrolls slower than the sky. It starts 150px from the top of the frame and stops 150px from the bottom ----- */
+  (function () {
+    var fg = document.querySelector('.hero5-fg');
+    if (!fg || reduce) return;
+    var box = fg.parentElement.parentElement, ticking = false;
+    var LT = 195, LB = 405, IW = 1024, IH = 572;   /* top and bottom of the traffic light in the source photo */
+    var y0 = 0, y1 = 0, range = 1;
+    function measure() {
+      var W = box.offsetWidth, H = box.offsetHeight;
+      var sc = Math.max(W / IW, H / IH), offY = (H - IH * sc) * 0.52;
+      var top = offY + LT * sc, bottom = offY + LB * sc, lh = bottom - top;
+      var m = Math.min(150, Math.max(0, (H - lh) * 0.3));
+      y0 = m - top;               /* light's top edge sits m px below the frame top */
+      y1 = (H - m) - bottom;      /* light's bottom edge sits m px above the frame bottom */
+      range = Math.max(1, (box.getBoundingClientRect().top + (window.scrollY || 0) + H * 0.7) * 2);   /* 2x slower */
+    }
+    function upd() {
+      ticking = false;
+      var p = Math.min(1, Math.max(0, (window.scrollY || 0) / range));
+      fg.style.translate = '0 ' + (y0 + (y1 - y0) * p).toFixed(1) + 'px';
+    }
+    window.addEventListener('scroll', function () { if (!ticking) { ticking = true; requestAnimationFrame(upd); } }, { passive: true });
+    window.addEventListener('resize', function () { measure(); upd(); });
+    window.addEventListener('load', function () { measure(); upd(); });
+    measure(); upd();
+  })();
+
+  /* ----- hero flower: petals sway and the powder drifts on a soft wind (WebGL, falls back to the still image) ----- */
+  (function () {
+    var cv = document.querySelector('.hero5-cv'), img = document.querySelector('.hero5-bg');
+    if (!cv || !img || reduce) return;
+    var box = cv.parentElement;
+    var gl = cv.getContext('webgl', { alpha: false, antialias: false });
+    if (!gl) return;
+    var vs = 'attribute vec2 p;varying vec2 v;void main(){v=p*.5+.5;v.y=1.-v.y;gl_Position=vec4(p,0.,1.);}';
+    var fs = 'precision mediump float;varying vec2 v;uniform sampler2D t;uniform float T;uniform vec2 R;uniform vec2 I;' +
+      'float h(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}' +
+      'float n(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(h(i),h(i+vec2(1.,0.)),f.x),mix(h(i+vec2(0.,1.)),h(i+vec2(1.,1.)),f.x),f.y);}' +
+      /* the picture is fitted by height, so on wide screens the black sides simply continue */
+      'vec2 fit(vec2 q){float s=R.y/I.y;return vec2((q.x-.5)*R.x/(I.x*s)+.5,q.y);}' +
+      /* a gust that travels left to right, plus small turbulence */
+      'vec2 wind(vec2 u,float T){float g=.5+.5*sin(T*.55-u.x*3.2+sin(T*.21)*1.4);' +
+      'return vec2(.75+.55*g+.25*(n(u*3.+T*.25)-.5),-.18+.2*(n(u*4.-T*.2)-.5));}' +
+      'void main(){vec2 u=fit(v);' +
+      /* slow breathing zoom around the heart of the flower */
+      'vec2 c=vec2(.5,.78);float z=1.-.016*(.5+.5*sin(T*.16));u=c+(u-c)*z;' +
+      'vec2 asp=vec2(I.x/I.y,1.);vec2 d=(u-c)*asp;float r=length(d);' +
+      /* petals: the further from the heart, the more they lean with the gust and flutter */
+      'float amp=smoothstep(.06,.55,r);vec2 W=wind(u,T);' +
+      'vec2 sw=W*.0125*amp+vec2(n(u*5.+T*.45)-.5,n(u*5.7-T*.4+9.)-.5)*.014*amp;' +
+      'vec2 q=u-sw/asp;' +
+      /* powder: grains stream downwind in two overlapping phases, strongest at the edges */
+      'float dm=smoothstep(.22,.6,r);vec2 W2=wind(u,T*.8)*vec2(1.,1.);' +
+      'float p0=fract(T*.055),p1=fract(T*.055+.5);float w0=1.-abs(2.*p0-1.),w1=1.-abs(2.*p1-1.);' +
+      'vec3 a=texture2D(t,clamp(q-W2*.085*p0*dm/asp,0.,1.)).rgb;vec3 b=texture2D(t,clamp(q-W2*.085*p1*dm/asp,0.,1.)).rgb;' +
+      'vec3 col=(a*w0+b*w1)/max(w0+w1,.0001);' +
+      /* a faint warm shimmer travels across with the gust */
+      'float sh=.5+.5*sin(T*.55-u.x*3.2+sin(T*.21)*1.4);col*=1.+.07*sh*smoothstep(.1,.5,r);' +
+      /* fade into black before the edge of the photo, so wide screens never stretch it */
+      'col*=smoothstep(0.,.07,q.x)*smoothstep(0.,.07,1.-q.x)*smoothstep(0.,.05,q.y);' +
+      'gl_FragColor=vec4(col,1.);}';
+    function sh(type, src) { var o = gl.createShader(type); gl.shaderSource(o, src); gl.compileShader(o); return gl.getShaderParameter(o, gl.COMPILE_STATUS) ? o : null; }
+    var pr = gl.createProgram(), a = sh(gl.VERTEX_SHADER, vs), b = sh(gl.FRAGMENT_SHADER, fs);
+    if (!a || !b) return;
+    gl.attachShader(pr, a); gl.attachShader(pr, b); gl.linkProgram(pr);
+    if (!gl.getProgramParameter(pr, gl.LINK_STATUS)) return;
+    gl.useProgram(pr);
+    var buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+    var loc = gl.getAttribLocation(pr, 'p'); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+    var uT = gl.getUniformLocation(pr, 'T'), uR = gl.getUniformLocation(pr, 'R'), uI = gl.getUniformLocation(pr, 'I');
+    var tex = gl.createTexture(), ready = false, vis = false, raf = 0, t0 = performance.now();
+    function load() {
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, img);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.uniform1i(gl.getUniformLocation(pr, 't'), 0);
+      gl.uniform2f(uI, img.naturalWidth, img.naturalHeight);
+      ready = true; size(); frame(); cv.classList.add('on');
+    }
+    function size() {
+      var dpr = Math.min(window.devicePixelRatio || 1, 1.5), w = Math.max(2, Math.round(box.clientWidth * dpr)), h = Math.max(2, Math.round(box.clientHeight * dpr));
+      if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+      gl.viewport(0, 0, w, h); gl.uniform2f(uR, w, h);
+    }
+    function frame() { gl.uniform1f(uT, (performance.now() - t0) / 1000 + 3); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); }
+    function loop() { if (!vis) { raf = 0; return; } frame(); raf = requestAnimationFrame(loop); }
+    new IntersectionObserver(function (en) {
+      vis = en[0].isIntersecting;
+      if (vis && ready && !raf) raf = requestAnimationFrame(loop);
+    }).observe(box);
+    window.addEventListener('resize', function () { if (ready) { size(); frame(); } });
+    if (img.complete && img.naturalWidth) load(); else img.addEventListener('load', load);
+  })();
+
   /* ----- living hero: drifting pollen ----- */
   var art = document.querySelector('.hero-live .art');
   if (art && !reduce) {
@@ -437,19 +535,42 @@
   }
 
 
-  /* ----- living hero: rippling water (WebGL, falls back to the still image) ----- */
+  /* ----- living hero: clouds drift, flowers bloom in slow waves, the meadow sways (WebGL, falls back to the still image) ----- */
   (function () {
     var box = document.querySelector('.hero-water'), cv = box && box.querySelector('.water-cv'), img = box && box.querySelector('img');
     if (!cv || !img || reduce) return;
     var gl = cv.getContext('webgl', { alpha: false, antialias: false, premultipliedAlpha: false });
     if (!gl) return;
     var vs = 'attribute vec2 p;varying vec2 v;void main(){v=p*.5+.5;v.y=1.-v.y;gl_Position=vec4(p,0.,1.);}';
-    var fs = 'precision mediump float;varying vec2 v;uniform sampler2D t;uniform float T;uniform vec2 R;uniform vec2 I;uniform vec4 D[6];' +
+    var fs = 'precision mediump float;varying vec2 v;uniform sampler2D t;uniform float T;uniform vec2 R;uniform vec2 I;uniform vec2 P;' +
       'vec2 cover(vec2 uv){float ra=R.x/R.y,ia=I.x/I.y;vec2 s=ra>ia?vec2(1.,ia/ra):vec2(ra/ia,1.);return (uv-.5)*s+.5;}' +
-      'void main(){vec2 a=vec2(R.x/R.y,1.);vec2 q=v*a;vec2 off=vec2(0.);' +
-      'for(int i=0;i<6;i++){vec2 c=D[i].xy*a;float age=T-D[i].z;if(D[i].w>0.&&age>0.&&age<7.){vec2 dd=q-c;float r=length(dd);float f=r-age*.13;float env=exp(-abs(f)*9.)*exp(-age*.55)*D[i].w;off+=normalize(dd+1e-4)*sin(f*55.)*env*.0075;}}' +
-      'off+=vec2(sin(q.y*9.+T*.7)+sin(q.y*21.-T*.5)*.5,cos(q.x*8.-T*.6)+cos(q.x*19.+T*.45)*.5)*.0011;' +
-      'vec2 uv=v+off/a*a;gl_FragColor=vec4(texture2D(t,cover(uv)).rgb,1.);}';
+      /* how pink or purple a colour is: flowers only, never grass, sky, clouds or the yellow dress */
+      'float pkc(vec3 c,float y){return clamp(((c.r+c.b)*.5-c.g)*3.,0.,1.)*smoothstep(.44,.52,y);}' +
+      'void main(){vec2 u=cover(v);' +
+      /* slow breathing zoom around the girl and a slow camera drift */
+      'float z=.93-.018*sin(T*.09);vec2 f=vec2(.5,.44);u=f+(u-f)*z;' +
+      'float depth=smoothstep(.40,.95,u.y);u+=P*(.003+.012*depth);' +
+      /* keep the girl and her chair steady */
+      'vec2 g=(u-vec2(.5,.42))/vec2(.06,.11);float keep=smoothstep(.85,1.6,length(g));' +
+      /* clouds drift sideways in the sky only */
+      'float sky=1.-smoothstep(.43,.53,u.y);' +
+      'u+=vec2(sin(T*.11)*.0105+sin(T*.23+u.y*6.)*.0035,cos(T*.09)*.003)*sky*keep;' +
+      /* a light breeze moves the meadow */
+      'float fg=smoothstep(.52,.9,u.y);' +
+      'float sw=sin(u.x*11.+T*1.1+u.y*5.)+.5*sin(u.x*23.-T*.8)+.8*sin(u.x*3.-T*.7);' +
+      'u.x+=sw*.0020*fg*keep;u.y+=cos(u.x*9.+T*.9)*.0010*fg*keep;' +
+      /* blooming: a slow wave rolls across the meadow; every pink flower opens outward, then settles */
+      'float w=.5+.5*sin(T*.85-(u.x*4.6+u.y*3.2));float bl=w*w*(3.-2.*w);' +
+      'float zone=smoothstep(.46,.62,u.y)*keep;' +
+      'float rr=(.0032+.0075*depth)*bl*zone;vec2 asp=vec2(1.,I.x/I.y);' +
+      'vec3 base=texture2D(t,clamp(u,0.,1.)).rgb;float pb=pkc(base,u.y);vec3 bc=base;float best=pb;' +
+      'for(int i=0;i<6;i++){float a=float(i)*1.0472+T*.12;vec2 d=vec2(cos(a),sin(a))*asp;' +
+      'vec3 c1=texture2D(t,clamp(u+d*rr,0.,1.)).rgb;float p1=pkc(c1,u.y);if(p1>best){best=p1;bc=c1;}' +
+      'vec3 c2=texture2D(t,clamp(u+d*rr*.5,0.,1.)).rgb;float p2=pkc(c2,u.y);if(p2>best){best=p2;bc=c2;}}' +
+      'vec3 col=mix(base,bc,clamp((best-pb)*2.4,0.,1.)*.92);' +
+      /* a soft warm glow in the petals as they open */
+      'col=mix(col,col*vec3(1.10,.96,1.06)+.025,pkc(col,u.y)*bl*zone*.5);' +
+      'gl_FragColor=vec4(col,1.);}';
     function sh(type, src) { var o = gl.createShader(type); gl.shaderSource(o, src); gl.compileShader(o); return gl.getShaderParameter(o, gl.COMPILE_STATUS) ? o : null; }
     var pr = gl.createProgram(), a = sh(gl.VERTEX_SHADER, vs), b = sh(gl.FRAGMENT_SHADER, fs);
     if (!a || !b) return;
@@ -459,14 +580,8 @@
     var buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf);
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
     var loc = gl.getAttribLocation(pr, 'p'); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
-    var uT = gl.getUniformLocation(pr, 'T'), uR = gl.getUniformLocation(pr, 'R'), uI = gl.getUniformLocation(pr, 'I'), uD = gl.getUniformLocation(pr, 'D');
+    var uT = gl.getUniformLocation(pr, 'T'), uR = gl.getUniformLocation(pr, 'R'), uI = gl.getUniformLocation(pr, 'I'), uP = gl.getUniformLocation(pr, 'P');
     var tex = gl.createTexture(), ready = false, vis = false, raf = 0, t0 = performance.now();
-    var drops = [], dv = new Float32Array(24);
-    function drop(x, y, str) {
-      var now = (performance.now() - t0) / 1000;
-      drops.push({ x: x, y: y, t: now, s: str });
-      if (drops.length > 6) drops.shift();
-    }
     function load() {
       gl.bindTexture(gl.TEXTURE_2D, tex);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, img);
@@ -485,12 +600,9 @@
     }
     function frame() {
       var now = (performance.now() - t0) / 1000;
-      if (!drops.length || now - drops[drops.length - 1].t > 3.2) { drop(0.18 + Math.random() * 0.64, 0.2 + Math.random() * 0.6, 0.8); }
-      for (var i = 0; i < 6; i++) {
-        var d = drops[i];
-        dv[i * 4] = d ? d.x : 0; dv[i * 4 + 1] = d ? d.y : 0; dv[i * 4 + 2] = d ? d.t : 0; dv[i * 4 + 3] = d ? d.s : 0;
-      }
-      gl.uniform1f(uT, now); gl.uniform4fv(uD, dv);
+      /* the camera drifts on its own, slowly; nothing reacts to the cursor */
+      gl.uniform2f(uP, Math.sin(now * .13) * .6, Math.cos(now * .1) * .4);
+      gl.uniform1f(uT, now);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     }
     function loop() { if (!vis) { raf = 0; return; } frame(); raf = requestAnimationFrame(loop); }
@@ -499,15 +611,6 @@
       if (vis && ready && !raf) raf = requestAnimationFrame(loop);
     }).observe(box);
     window.addEventListener('resize', function () { if (ready) { size(); frame(); } });
-    var lastDrop = 0;
-    box.addEventListener('pointermove', function (e) {
-      if (e.pointerType === 'touch') return;
-      var now = performance.now(); if (now - lastDrop < 380) return; lastDrop = now;
-      var r = box.getBoundingClientRect(); drop((e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height, 1);
-    });
-    box.addEventListener('pointerdown', function (e) {
-      var r = box.getBoundingClientRect(); drop((e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height, 1.4);
-    });
     if (img.complete && img.naturalWidth) load(); else img.addEventListener('load', load);
   })();
 
